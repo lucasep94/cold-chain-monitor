@@ -147,3 +147,6 @@ vite.config.ts.timestamp-*
 
 # Turbo Repo
 .turbo
+
+# Simulator API keys (written by the seed script)
+simulator/keys.json
