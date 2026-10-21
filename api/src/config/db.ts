@@ -1,9 +1,14 @@
 import mongoose from 'mongoose';
 import type { Logger } from 'pino';
 
+let closing = false;
+
 export async function connectDb(uri: string, logger: Logger): Promise<typeof mongoose> {
+  closing = false;
+  mongoose.connection.removeAllListeners('disconnected').removeAllListeners('reconnected');
   mongoose.connection.on('disconnected', () => {
-    logger.warn('MongoDB disconnected');
+    // Only an unexpected loss of connection is worth a warning.
+    if (!closing) logger.warn('MongoDB disconnected');
   });
   mongoose.connection.on('reconnected', () => {
     logger.info('MongoDB reconnected');
@@ -15,6 +20,7 @@ export async function connectDb(uri: string, logger: Logger): Promise<typeof mon
 }
 
 export async function disconnectDb(): Promise<void> {
+  closing = true;
   await mongoose.disconnect();
 }
 
