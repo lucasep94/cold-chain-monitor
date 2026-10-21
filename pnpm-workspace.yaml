@@ -1,5 +1,6 @@
 packages:
   - api
+  - simulator
 
 # esbuild (used by tsx and vitest) needs its postinstall; mongod binaries are
 # downloaded on first test run instead of at install time.
