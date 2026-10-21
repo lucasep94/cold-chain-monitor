@@ -27,6 +27,7 @@ export const envSchema = z.object({
   JWT_REFRESH_TTL: z.string().min(1),
   CORS_ORIGINS: originList,
   READINGS_RETENTION_DAYS: positiveInt,
+  READINGS_MAX_AGE_HOURS: positiveInt,
   SIGNAL_TIMEOUT_MINUTES: positiveInt,
   ALERT_CONSECUTIVE_READINGS: positiveInt,
   MAX_BATCH_SIZE: positiveInt,

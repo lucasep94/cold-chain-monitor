@@ -1,4 +1,5 @@
 import { createApp } from './app.js';
+import { ensureCollections } from './config/collections.js';
 import { connectDb, disconnectDb } from './config/db.js';
 import { EnvValidationError, loadEnv, type Env } from './config/env.js';
 import { createLogger } from './config/logger.js';
@@ -20,8 +21,9 @@ async function main(): Promise<void> {
   const logger = createLogger(env);
 
   await connectDb(env.MONGODB_URI, logger);
+  await ensureCollections(env);
 
-  const app = createApp({ logger });
+  const app = createApp({ logger, env });
   const server = app.listen(env.PORT, () => {
     logger.info({ port: env.PORT, env: env.NODE_ENV }, 'API listening');
   });
