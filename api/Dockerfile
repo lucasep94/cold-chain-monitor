@@ -6,6 +6,7 @@ RUN npm install -g pnpm@11.1.3
 WORKDIR /app
 COPY pnpm-lock.yaml pnpm-workspace.yaml package.json ./
 COPY api/package.json api/
+COPY simulator/package.json simulator/
 
 FROM base AS build
 RUN pnpm install --frozen-lockfile --filter api
