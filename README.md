@@ -64,23 +64,40 @@ El código sigue una arquitectura por capas: `routes → controllers → service
 | **`lastReading` solo avanza si el timestamp es mayor**                              | Las lecturas pueden llegar desordenadas                                                     |
 | **Histéresis configurable**                                                         | Exige N lecturas consecutivas fuera de rango para abrir una alerta y evita falsos positivos |
 
-## API (prevista)
+## API
 
 Base: `/api/v1`. Los errores siguen el formato `{ error: { code, message, details? } }`.
 
-| Método | Ruta                      | Auth        | Descripción                                            |
-| ------ | ------------------------- | ----------- | ------------------------------------------------------ |
-| POST   | `/readings`               | API key     | Ingesta de 1 a 100 lecturas                            |
-| POST   | `/auth/login`             | —           | Login de operadores                                    |
-| POST   | `/auth/refresh`           | cookie      | Renueva el access token                                |
-| POST   | `/auth/logout`            | JWT         | Cierra la sesión                                       |
-| GET    | `/vehicles`               | JWT         | Lista con estado actual                                |
-| POST   | `/vehicles`               | JWT (admin) | Crea un vehículo y devuelve su API key                 |
-| GET    | `/vehicles/:id/readings`  | JWT         | Histórico en crudo o agregado (`?from&to&interval=5m`) |
-| GET    | `/alerts`                 | JWT         | Alertas filtrables por estado, tipo y vehículo         |
-| PATCH  | `/alerts/:id/acknowledge` | JWT         | Reconocer una alerta                                   |
-| GET    | `/health`                 | —           | Estado del servicio y de la conexión a Mongo           |
-| GET    | `/docs`                   | —           | Swagger UI                                             |
+| Método | Ruta                       | Auth        | Descripción                                            | Estado |
+| ------ | -------------------------- | ----------- | ------------------------------------------------------ | ------ |
+| POST   | `/readings`                | API key     | Ingesta de 1 a 100 lecturas                            | ✅     |
+| GET    | `/vehicles`                | JWT         | Lista con estado actual (`?status&plate&page&limit`)   | ✅ \*  |
+| POST   | `/vehicles`                | JWT (admin) | Crea un vehículo y devuelve su API key una sola vez    | ✅ \*  |
+| GET    | `/vehicles/:id`            | JWT         | Detalle                                                | ✅ \*  |
+| PATCH  | `/vehicles/:id`            | JWT (admin) | Edita rango de temperatura, tipo o estado              | ✅ \*  |
+| POST   | `/vehicles/:id/rotate-key` | JWT (admin) | Regenera la API key; la anterior deja de funcionar     | ✅ \*  |
+| GET    | `/health`                  | —           | Estado del servicio y de la conexión a Mongo           | ✅     |
+| POST   | `/auth/login`              | —           | Login de operadores                                    | Fase 5 |
+| POST   | `/auth/refresh`            | cookie      | Renueva el access token                                | Fase 5 |
+| POST   | `/auth/logout`             | JWT         | Cierra la sesión                                       | Fase 5 |
+| GET    | `/vehicles/:id/readings`   | JWT         | Histórico en crudo o agregado (`?from&to&interval=5m`) | Fase 3 |
+| GET    | `/alerts`                  | JWT         | Alertas filtrables por estado, tipo y vehículo         | Fase 4 |
+| PATCH  | `/alerts/:id/acknowledge`  | JWT         | Reconocer una alerta                                   | Fase 4 |
+| GET    | `/docs`                    | —           | Swagger UI                                             | Fase 6 |
+
+\* Hasta la fase 5 las rutas de vehículos no exigen JWT.
+
+### Ingesta
+
+```bash
+curl -X POST http://localhost:3000/api/v1/readings \
+  -H 'content-type: application/json' -H 'x-api-key: ccm_...' \
+  -d '{"timestamp":"2026-10-21T10:00:00Z","temperature":-20.4,"location":{"type":"Point","coordinates":[-3.70,40.41]},"speed":72}'
+```
+
+- Acepta una lectura o un array de hasta `MAX_BATCH_SIZE`. Cada lectura se valida por separado: temperatura entre -60 y 60 °C, coordenadas `[lng, lat]` válidas y `timestamp` como mucho 2 min en el futuro y no más antiguo que `READINGS_MAX_AGE_HOURS`.
+- **202** `{ accepted, rejected: [{ index, errors }] }` si se guardó al menos una lectura; **400** con el mismo detalle si no se guardó ninguna.
+- **401** sin API key o con una desconocida; **403** si el vehículo está `inactive`.
 
 ## Puesta en marcha
 
@@ -109,18 +126,39 @@ pnpm dev
 | `pnpm dev`                     | API en modo watch (`tsx`) leyendo `.env`                                        |
 | `pnpm test`                    | Tests con MongoDB 7 en memoria (la primera vez descarga el binario de `mongod`) |
 | `pnpm lint` / `pnpm typecheck` | ESLint con reglas type-checked y `tsc --noEmit`                                 |
-| `pnpm build`                   | Compila la API a `api/dist`                                                     |
+| `pnpm build`                   | Compila la API y el simulador                                                   |
 | `pnpm format`                  | Prettier                                                                        |
+| `pnpm --filter api seed`       | Crea la flota de demo y escribe sus API keys en `simulator/keys.json`           |
 
-El seed de datos de demo llegará en la fase 2.
+### Demo con el simulador
+
+```bash
+docker compose up -d --build              # MongoDB y API
+pnpm install
+pnpm --filter api seed                    # 5 camiones ficticios + simulator/keys.json
+docker compose --profile demo up simulator
+```
+
+O, sin Docker para el simulador:
+
+```bash
+pnpm --filter simulator start --trucks 3 --interval 2
+```
+
+El seed borra y vuelve a crear los vehículos de demo con claves nuevas, así que hay que reiniciar el simulador después de ejecutarlo.
 
 ### Simulador
 
-El simulador emula una flota de camiones que recorren rutas predefinidas y envían lecturas a la API.
+Cada camión recorre ida y vuelta una ruta predefinida (Madrid-Valencia, Zaragoza-Barcelona o Sevilla-Málaga) con velocidad variable, y su temperatura oscila con ruido gaussiano alrededor del centro de su rango. Usa la API key de su vehículo, igual que un dispositivo real.
 
-```bash
-pnpm --filter simulator start --trucks 5 --interval 5 --scenario cooling-failure:truck-2
-```
+| Opción            | Por defecto                                 |
+| ----------------- | ------------------------------------------- |
+| `--trucks <n>`    | Todas las claves de `keys.json`             |
+| `--interval <s>`  | `5`                                         |
+| `--api-url <url>` | `$API_URL` o `http://localhost:3000/api/v1` |
+| `--keys <path>`   | `./keys.json`                               |
+
+Escenarios de fallo (fase 4):
 
 | Escenario         | Efecto                                                             |
 | ----------------- | ------------------------------------------------------------------ |
@@ -148,7 +186,8 @@ Los valores de [`.env.example`](.env.example) son solo para desarrollo.
 | `MONGODB_URI`                              | Conexión a MongoDB                                     | `mongodb://localhost:27017/coldchain` |
 | `JWT_ACCESS_SECRET` / `JWT_REFRESH_SECRET` | Secretos de los tokens                                 | —                                     |
 | `CORS_ORIGINS`                             | Orígenes permitidos                                    | —                                     |
-| `READINGS_RETENTION_DAYS`                  | Retención de lecturas                                  | `30`                                  |
+| `READINGS_RETENTION_DAYS`                  | Retención de lecturas (TTL de la time-series)          | `30`                                  |
+| `READINGS_MAX_AGE_HOURS`                   | Antigüedad máxima aceptada para una lectura            | `24`                                  |
 | `SIGNAL_TIMEOUT_MINUTES`                   | Minutos sin lecturas para marcar pérdida de señal      | `5`                                   |
 | `ALERT_CONSECUTIVE_READINGS`               | Lecturas consecutivas fuera de rango para abrir alerta | `2`                                   |
 | `MAX_BATCH_SIZE`                           | Máximo de lecturas por petición                        | `100`                                 |
@@ -169,9 +208,14 @@ coldchain-telemetry-api/
 
 Vitest + Supertest contra un MongoDB 7 en memoria (`mongodb-memory-server`), sin dependencias externas.
 
-Cubierto ahora: validación de variables de entorno, middleware de errores (formato uniforme, JSON malformado, 404), middleware `validate` (campos desconocidos, inyección NoSQL) y `/health` con Mongo conectado y caído.
+Cubierto ahora:
 
-Previsto: motor de alertas, ingesta (lotes parciales y lecturas desordenadas), permisos por rol y concurrencia de alertas.
+- Variables de entorno, middleware de errores y `validate` (campos desconocidos, inyección NoSQL), `/health` con Mongo conectado y caído.
+- Vehículos: creación, matrícula duplicada (409), filtros, paginación, `minTemp < maxTemp` sobre los valores guardados, rotación de la API key (la anterior devuelve 401).
+- Ingesta: API key ausente, desconocida o de un vehículo inactivo; lote parcialmente inválido y totalmente inválido; límites del lote; lecturas desordenadas y 20 peticiones en paralelo sin que `lastReading` retroceda; colección time-series con su TTL.
+- Simulador: interpolación de rutas, ruido gaussiano y movimiento del camión.
+
+Previsto: motor de alertas, permisos por rol y concurrencia de alertas.
 
 ```bash
 pnpm test
@@ -180,7 +224,7 @@ pnpm test
 ## Roadmap
 
 - [x] **Fase 1.** Base del proyecto: TypeScript, Express, Docker Compose, `/health`
-- [ ] **Fase 2.** Vehículos e ingesta: modelos, `POST /readings`, simulador básico
+- [x] **Fase 2.** Vehículos e ingesta: modelos, `POST /readings`, simulador básico
 - [ ] **Fase 3.** Histórico: consulta en crudo y agregada
 - [ ] **Fase 4.** Alertas: motor, job de pérdida de señal y escenarios del simulador
 - [ ] **Fase 5.** Autenticación y roles

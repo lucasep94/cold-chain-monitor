@@ -32,5 +32,20 @@ services:
       mongo:
         condition: service_healthy
 
+  # Demo only: docker compose --profile demo up (run `pnpm --filter api seed` first).
+  simulator:
+    profiles: ['demo']
+    build:
+      context: .
+      dockerfile: simulator/Dockerfile
+    environment:
+      API_URL: http://api:3000/api/v1
+    volumes:
+      - ./simulator/keys.json:/app/keys.json:ro
+    command: ['--interval', '5']
+    depends_on:
+      api:
+        condition: service_healthy
+
 volumes:
   mongo-data:

@@ -26,11 +26,14 @@ export default tseslint.config(
   },
   {
     // Supertest types response bodies as `any`; asserting on them is the point of the tests.
+    // Non-null assertions are fine where a failing assertion would surface the problem anyway.
     files: ['**/tests/**/*.ts'],
     rules: {
       '@typescript-eslint/no-unsafe-member-access': 'off',
       '@typescript-eslint/no-unsafe-argument': 'off',
       '@typescript-eslint/no-unsafe-assignment': 'off',
+      '@typescript-eslint/no-unsafe-call': 'off',
+      '@typescript-eslint/no-non-null-assertion': 'off',
     },
   },
   {
